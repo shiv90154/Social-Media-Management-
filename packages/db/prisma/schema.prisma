@@ -1,0 +1,330 @@
+// Social Media Manager — Prisma schema
+// See C:\Users\shiva\.claude\plans\ye-bnaane-ki-schr-mossy-rivest.md for the
+// architecture this schema implements.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum PlatformType {
+  INSTAGRAM
+  FACEBOOK
+  LINKEDIN
+  X
+  YOUTUBE
+  TIKTOK
+  THREADS
+  PINTEREST
+  SNAPCHAT
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  ERROR
+  NOT_CONFIGURED
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  PARTIALLY_FAILED
+  CANCELLED
+}
+
+enum TargetStatus {
+  PENDING
+  QUEUED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  SKIPPED_UNSUPPORTED
+  CANCELLED
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  GIF
+}
+
+enum NotificationType {
+  PUBLISH_SUCCESS
+  PUBLISH_FAILURE
+  PUBLISH_PARTIAL
+  TOKEN_EXPIRING
+  TOKEN_EXPIRED
+  ACCOUNT_DISCONNECTED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      String   @default("free")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships    Membership[]
+  socialAccounts SocialAccount[]
+  posts          Post[]
+  mediaAssets    MediaAsset[]
+  notifications  Notification[]
+
+  @@map("organizations")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String?
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships Membership[]
+  sessions    Session[]
+  accounts    AuthAccount[]
+
+  @@map("users")
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MembershipRole @default(OWNER)
+  createdAt      DateTime       @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@map("memberships")
+}
+
+// Auth.js (NextAuth) adapter models — app login only, distinct from
+// SocialAccount (which represents a connected *publishing* platform account).
+model AuthAccount {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("auth_accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Connected social platform accounts
+// ---------------------------------------------------------------------------
+
+model SocialAccount {
+  id             String            @id @default(cuid())
+  organizationId String
+  platform       PlatformType
+  displayName    String
+  handle         String?
+  avatarUrl      String?
+  externalUserId String
+  // Encrypted at the application layer (AES-256-GCM, see packages/auth/src/crypto.ts)
+  // before being written here — never store platform tokens in plaintext.
+  accessToken    String            @db.Text
+  refreshToken   String?           @db.Text
+  tokenExpiresAt DateTime?
+  scopes         String[]
+  status         ConnectionStatus  @default(ACTIVE)
+  lastError      String?
+  // Platform-specific extras, e.g. { facebookPageId, igBusinessId, pinterestDefaultBoardId }
+  metadata       Json?
+  connectedBy    String
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  postTargets  PostTarget[]
+
+  @@unique([organizationId, platform, externalUserId])
+  @@index([organizationId])
+  @@map("social_accounts")
+}
+
+// ---------------------------------------------------------------------------
+// Media library
+// ---------------------------------------------------------------------------
+
+model MediaAsset {
+  id             String    @id @default(cuid())
+  organizationId String
+  type           MediaType
+  storageKey     String
+  url            String
+  mimeType       String
+  sizeBytes      Int
+  width          Int?
+  height         Int?
+  durationSec    Float?
+  filename       String
+  createdBy      String
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  postMedia    PostMedia[]
+
+  @@index([organizationId])
+  @@map("media_assets")
+}
+
+// ---------------------------------------------------------------------------
+// Posts
+// ---------------------------------------------------------------------------
+
+model Post {
+  id             String     @id @default(cuid())
+  organizationId String
+  createdBy      String
+  baseCaption    String     @db.Text
+  status         PostStatus @default(DRAFT)
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  timezone       String     @default("UTC")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  targets      PostTarget[]
+  media        PostMedia[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, scheduledAt])
+  @@map("posts")
+}
+
+model PostMedia {
+  id           String @id @default(cuid())
+  postId       String
+  mediaAssetId String
+  order        Int    @default(0)
+
+  post       Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, mediaAssetId])
+  @@map("post_media")
+}
+
+model PostTarget {
+  id              String       @id @default(cuid())
+  postId          String
+  socialAccountId String
+  platform        PlatformType
+  captionOverride String?      @db.Text
+  status          TargetStatus @default(PENDING)
+  externalPostId  String?
+  externalUrl     String?
+  error           String?
+  errorCode       String?
+  bullJobId       String?
+  attempts        Int          @default(0)
+  publishedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  post          Post                @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount       @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  analytics     AnalyticsSnapshot[]
+
+  @@index([postId])
+  @@index([socialAccountId])
+  @@index([status])
+  @@map("post_targets")
+}
+
+model AnalyticsSnapshot {
+  id           String   @id @default(cuid())
+  postTargetId String
+  fetchedAt    DateTime @default(now())
+  // Platform-specific metrics, e.g. { likes, comments, shares, impressions, views }
+  metrics      Json
+
+  postTarget PostTarget @relation(fields: [postTargetId], references: [id], onDelete: Cascade)
+
+  @@index([postTargetId, fetchedAt])
+  @@map("analytics_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String?
+  type           NotificationType
+  title          String
+  body           String
+  read           Boolean          @default(false)
+  relatedPostId  String?
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, read])
+  @@map("notifications")
+}
