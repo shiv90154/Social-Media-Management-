@@ -55,9 +55,8 @@ export async function jsonRequest<T = unknown>(url: string, options: JsonRequest
 
   if (!response.ok) {
     const { errorCode, retryable } = classifyHttpStatus(response.status);
-    const message =
-      (body && typeof body === "object" && extractErrorMessage(body)) ||
-      `Request failed with status ${response.status}`;
+    const extracted = body && typeof body === "object" ? extractErrorMessage(body) : undefined;
+    const message = extracted ?? `Request failed with status ${response.status}`;
     throw new PlatformApiError(message, errorCode, retryable, response.status);
   }
 

@@ -117,7 +117,12 @@ export interface PlatformConnector {
 
   getAuthUrl(state: string, redirectUri: string): string;
 
-  handleOAuthCallback(code: string, redirectUri: string): Promise<OAuthResult>;
+  /**
+   * `state` is passed through so PKCE-based connectors (e.g. X) can
+   * re-derive their code_verifier without needing separate server-side
+   * storage between the redirect and the callback.
+   */
+  handleOAuthCallback(code: string, redirectUri: string, state?: string): Promise<OAuthResult>;
 
   refreshToken(account: SocialAccountCredentials): Promise<OAuthResult>;
 

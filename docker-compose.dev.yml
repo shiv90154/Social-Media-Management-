@@ -1,0 +1,32 @@
+# Local development overlay: bind-mounts source for hot reload and exposes
+# Postgres for inspection with a local client. Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: "3.9"
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  web:
+    build:
+      target: deps
+    command: sh -c "pnpm --filter @smm/db run generate && pnpm --filter @smm/web run dev"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - .:/repo
+      - /repo/node_modules
+      - /repo/apps/web/.next
+    ports:
+      - "3000:3000"
+
+  worker:
+    build:
+      target: deps
+    command: sh -c "pnpm --filter @smm/db run generate && pnpm --filter @smm/worker run dev"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - .:/repo
+      - /repo/node_modules

@@ -1,0 +1,8 @@
+{
+  "extends": "@smm/config/nextjs.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
